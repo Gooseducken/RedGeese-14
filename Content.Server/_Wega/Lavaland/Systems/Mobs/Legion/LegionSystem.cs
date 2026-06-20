@@ -21,6 +21,7 @@ public sealed partial class LegionSystem : EntitySystem
     public override void Initialize()
     {
         SubscribeLocalEvent<LegionBossComponent, MapInitEvent>(OnMapInit);
+        SubscribeLocalEvent<LegionSplitComponent, MapInitEvent>(OnSplitMapInit);
         SubscribeLocalEvent<LegionBossComponent, MegaLegionAction>(OnAction);
         SubscribeLocalEvent<LegionBossComponent, MobStateChangedEvent>(OnBossKilled);
         SubscribeLocalEvent<LegionSplitComponent, MobStateChangedEvent>(OnSplitKilled);
@@ -48,6 +49,11 @@ public sealed partial class LegionSystem : EntitySystem
         ent.Comp.NextChargeTime = _timing.CurTime;
     }
 
+    private void OnSplitMapInit(Entity<LegionSplitComponent> ent, ref MapInitEvent args)
+    {
+        ent.Comp.SplitGroup = Guid.NewGuid();
+    }
+
     private void OnAction(Entity<LegionBossComponent> ent, ref MegaLegionAction args)
     {
         if (_mobState.IsIncapacitated(ent) || _mobState.IsIncapacitated(args.Target))
@@ -69,7 +75,11 @@ public sealed partial class LegionSystem : EntitySystem
         if (_timing.CurTime < ent.Comp.NextChargeTime)
             return;
 
-        var direction = (Transform(args.Target).Coordinates.Position - Transform(ent).Coordinates.Position).Normalized();
+        var delta = Transform(args.Target).Coordinates.Position - Transform(ent).Coordinates.Position;
+        if (delta.LengthSquared() < 0.0001f)
+            return;
+
+        var direction = delta.Normalized();
         _throwing.TryThrow(ent, Transform(ent).Coordinates.Offset(direction * 6f), 15f);
         ent.Comp.NextChargeTime = _timing.CurTime + TimeSpan.FromSeconds(ent.Comp.ChargeInterval);
     }
@@ -88,8 +98,13 @@ public sealed partial class LegionSystem : EntitySystem
 
         if (!HasComp<LegionSplitComponent>(ent))
         {
+            var splitGroup = Guid.NewGuid();
             foreach (var prototype in ent.Comp.SplitPrototypes)
-                Spawn(prototype, coords);
+            {
+                var split = Spawn(prototype, coords);
+                if (TryComp<LegionSplitComponent>(split, out var splitComponent))
+                    splitComponent.SplitGroup = splitGroup;
+            }
         }
 
         QueueDel(ent);
@@ -103,15 +118,35 @@ public sealed partial class LegionSystem : EntitySystem
         var coords = Transform(ent).Coordinates;
         if (ent.Comp.NextSplitPrototype is { } nextSplit)
         {
-            Spawn(nextSplit, coords);
-            Spawn(nextSplit, coords);
+            for (var i = 0; i < 2; i++)
+            {
+                var split = Spawn(nextSplit, coords);
+                if (TryComp<LegionSplitComponent>(split, out var splitComponent))
+                    splitComponent.SplitGroup = ent.Comp.SplitGroup;
+            }
         }
-        else if (TryComp<LegionBossComponent>(ent, out var boss))
+        else if (TryComp<LegionBossComponent>(ent, out var boss) && IsLastLivingSplit(ent, ent.Comp.SplitGroup))
         {
             foreach (var reward in boss.RewardsProto)
                 Spawn(reward, coords);
         }
 
         QueueDel(ent);
+    }
+
+    private bool IsLastLivingSplit(EntityUid dyingSplit, Guid splitGroup)
+    {
+        var query = EntityQueryEnumerator<LegionSplitComponent>();
+        while (query.MoveNext(out var uid, out var split))
+        {
+            if (uid != dyingSplit &&
+                split.SplitGroup == splitGroup &&
+                !_mobState.IsDead(uid))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

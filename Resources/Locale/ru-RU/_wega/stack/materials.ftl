@@ -8,5 +8,8 @@ stack-sinew =
         [few] сухожилия
        *[other] сухожилий
     }
-
 stack-chitin = хитин
+lavaland-trophy-goliath-name = щупальце голиафа
+lavaland-trophy-ancient-goliath-name = щупальце древнего голиафа
+lavaland-trophy-marrow-weaver-name = ядовитый клык костномозгового ткача
+lavaland-trophy-frostbite-weaver-name = морозная железа морозного ткача
